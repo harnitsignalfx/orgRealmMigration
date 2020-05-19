@@ -75,6 +75,37 @@ def getNewTeamId(oldTeamId):
         print('Error in getting new Team ID: ',e)
     return None
 
+def getNewSlackId(oldSlackId,notificationType):
+    print('Working with Slack/PD ID: ',oldSlackId)
+    respText = ''
+    
+    try:
+        headers = {'X-SF-TOKEN':token1,'Content-Type':'application/json'}
+        url = 'https://api.'+realm1+'.signalfx.com/v2/integration/'+oldSlackId
+        respText = requests.get(url=url,headers=headers).json()
+        name = urllib.parse.quote(respText['name'])
+        print('Slack/PD name->',name)
+        
+    except Exception as e:
+        print('Error in retrieving data: ',e)
+        return None
+        
+    try:
+        url = 'https://api.'+realm2+'.signalfx.com/v2/integration?name='+name+'&type='+notificationType
+        headers['X-SF-TOKEN']=token2
+        resp = requests.get(url=url,headers=headers).json()
+        #print('Response->',resp)
+        if resp['count'] > 0:
+            newSlackId = resp['results'][0]['id']
+            print('new Slack/Pd Id: ',newSlackId)
+            return newSlackId
+        else:
+            print('No Slack/PD integration matched in the new org')
+        
+    except Exception as e:
+        print('Error in getting new Slack/PD Id: ',e)
+    return None
+
 def getV2Detectors():
     results = []
     try:
@@ -90,6 +121,84 @@ def getV2Detectors():
         print(e)
     return results
 
+def setUsersAndTeams(respText):
+    
+    # Setup Permissions
+    users = respText['authorizedWriters']['users']
+    teams = respText['authorizedWriters']['teams']
+    
+    newUsers = []
+    newTeams = []
+    
+    for user in users:
+        newUserId = getNewUserId(user)
+        if newUserId != None:
+            newUsers.append(newUserId)
+            
+    for team in teams:
+        newTeamId = getNewTeamId(team)
+        if newTeamId != None:
+            newTeams.append(newTeamId)
+    
+    respText['authorizedWriters']['users'] = newUsers
+    respText['authorizedWriters']['teams'] = newTeams
+    
+    
+    newnotificationTeams = []
+    newlinkTeams = []
+    deleteNotifications = []
+    
+    # Setup notifications
+    
+    for rule in respText['rules']:
+        for notification in rule['notifications']:
+            if notification['type'] == 'Team':
+                print('In Team notifications...')
+                newTeam = getNewTeamId(notification['team'])
+                if newTeam == None:
+                    deleteNotifications.append(notification)
+                else:
+                    print('old team->',notification['team'],'...new team->',newTeam)
+                    notification['team'] = newTeam
+            elif notification['type'] == 'Slack':
+                print('In Slack notifications...')
+                newSlackId = getNewSlackId(notification['credentialId'],notification['type'])
+                if newSlackId == None:
+                    deleteNotifications.append(notification)
+                else:
+                    print('old slack id->',notification['credentialId'],'...new slack id->',newSlackId)
+                    notification['credentialId'] = newSlackId         
+            elif notification['type'] == 'PagerDuty':
+                print('In PagerDuty notifications...')
+                newPdId = getNewSlackId(notification['credentialId'],notification['type'])
+                if newPdId == None:
+                    deleteNotifications.append(notification)
+                else:
+                    print('old PD id->',notification['credentialId'],'...new PD id->',newPdId)
+                    notification['credentialId'] = newPdId
+    
+    for rule in respText['rules']:
+        for notification in deleteNotifications:
+            print('deleting notification..',notification)
+            rule['notifications'].remove(notification)
+    
+    # Setup team links
+    
+    newLinkTeams = []
+    for team in respText['teams']:
+        print('In linking teams...')
+        newTeam = getNewTeamId(team)
+        if newTeam != None:
+            print('old team->',team,'...new team->',newTeam)
+            newLinkTeams.append(newTeam)
+        
+    respText['teams'] = newLinkTeams
+    
+    # Remove existing Detector ID
+    respText.pop('id')
+    
+
+
 def exportDetector(detectorId):
     print('Working with Detector ID: ',detectorId)
     respText = ''
@@ -100,68 +209,13 @@ def exportDetector(detectorId):
         respText = requests.get(url=url,headers=headers).json()
         #print('RespText->',type(respText))
         
+        setUsersAndTeams(respText)
+        
         #print('Detector->',json.dumps(respText, indent=2))
-        
-        users = respText['authorizedWriters']['users']
-        teams = respText['authorizedWriters']['teams']
-        
-        newUsers = []
-        newTeams = []
-        
-        for user in users:
-            newUserId = getNewUserId(user)
-            if newUserId != None:
-                newUsers.append(newUserId)
-                
-        for team in teams:
-            newTeamId = getNewTeamId(team)
-            if newTeamId != None:
-                newTeams.append(newTeamId)        
-        
-        respText['authorizedWriters']['users'] = newUsers
-        respText['authorizedWriters']['teams'] = newTeams
-        
-        respText.pop('id')
-        #respText.pop('created')
-        #respText.pop('creator')
-        
-        newnotificationTeams = []
-        newlinkTeams = []
-        deleteNotifications = []
-        
-        for rule in respText['rules']:
-            for notification in rule['notifications']:
-                if notification['type'] == 'Team':
-                    print('In notifications...')
-                    newTeam = getNewTeamId(notification['team'])
-                    if newTeam == None:
-                        deleteNotifications.append(notification)
-                    else:
-                        print('old team->',notification['team'],'...new team->',newTeam)
-                        notification['team'] = newTeam
-        
-        for rule in respText['rules']:
-            for notification in deleteNotifications:
-                print('deleting notification..',notification)
-                rule['notifications'].remove(notification)
-        
-        
-        
-        newLinkTeams = []
-        for team in respText['teams']:
-            print('In linking teams...')
-            newTeam = getNewTeamId(team)
-            if newTeam != None:
-                print('old team->',team,'...new team->',newTeam)
-                newLinkTeams.append(newTeam)
-            
-        respText['teams'] = newLinkTeams
-       
-        
         
     except Exception as e:
         print('Error in retrieving data: ',e)
-        
+    
     try:
         url = 'https://api.'+realm2+'.signalfx.com/v2/detector'
         headers['X-SF-TOKEN']=token2
