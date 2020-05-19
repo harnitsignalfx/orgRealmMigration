@@ -8,7 +8,7 @@ realm2 = ''
 token1 = ''
 token2 = ''
 
-listOfDetectors=['EW9muroAcAA']
+#listOfDetectors=['EW9muroAcAA']
 
 def getNewUserId(oldUserId):
     print('Working with User ID: ',oldUserId)
